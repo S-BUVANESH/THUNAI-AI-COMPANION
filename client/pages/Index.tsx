@@ -364,7 +364,6 @@ function Team() {
           ))}
         </div>
       </div>
-      <div id="community" className="h-0" aria-hidden="true" />
     </section>
   );
 }
