@@ -21,17 +21,26 @@ export default function NavBar() {
   }, []);
 
   return (
-    <header className={cn(
-      "sticky top-0 z-50 w-full bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70",
-      scrolled ? "shadow-sm" : "shadow-none",
-    )}>
+    <header
+      className={cn(
+        "sticky top-0 z-50 w-full bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70",
+        scrolled ? "shadow-sm" : "shadow-none",
+      )}
+    >
       <nav className="container mx-auto flex h-16 items-center justify-between">
-        <a href="#hero" className="text-xl font-extrabold tracking-wide text-foreground">
+        <a
+          href="#hero"
+          className="text-xl font-extrabold tracking-wide text-foreground"
+        >
           <span className="text-primary">THUNAI</span>
         </a>
         <div className="hidden md:flex items-center gap-8">
           {links.map((l) => (
-            <a key={l.href} href={l.href} className="text-sm text-foreground/80 hover:text-foreground transition-colors">
+            <a
+              key={l.href}
+              href={l.href}
+              className="text-sm text-foreground/80 hover:text-foreground transition-colors"
+            >
               {l.label}
             </a>
           ))}
@@ -44,7 +53,15 @@ export default function NavBar() {
           className="md:hidden inline-flex items-center justify-center p-2 rounded-md border border-transparent hover:border-border"
           onClick={() => setOpen((v) => !v)}
         >
-          <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            className="h-6 w-6"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             {open ? (
               <path d="M18 6L6 18M6 6l12 12" />
             ) : (
@@ -57,12 +74,19 @@ export default function NavBar() {
         <div className="md:hidden border-t bg-white">
           <div className="container py-3 flex flex-col gap-3">
             {links.map((l) => (
-              <a key={l.href} href={l.href} onClick={() => setOpen(false)} className="py-2 text-foreground/80 hover:text-foreground">
+              <a
+                key={l.href}
+                href={l.href}
+                onClick={() => setOpen(false)}
+                className="py-2 text-foreground/80 hover:text-foreground"
+              >
                 {l.label}
               </a>
             ))}
             <Button asChild className="w-full">
-              <a href="#how" onClick={() => setOpen(false)}>Launch App</a>
+              <a href="#how" onClick={() => setOpen(false)}>
+                Launch App
+              </a>
             </Button>
           </div>
         </div>
