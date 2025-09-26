@@ -94,6 +94,7 @@ function InteractiveMockups() {
   const [tab, setTab] = useState<TabKey>("diagnose");
   return (
     <section id="how" className="py-20">
+      <div id="community" className="-mt-16 pt-16" aria-hidden="true" />
       <div className="container">
         <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-2">Experience the THUNAI Workflow</h2>
         <p className="text-foreground/70 mb-8">A realistic preview of Diagnose, Chat, and Community — all working together.</p>
