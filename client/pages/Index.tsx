@@ -18,7 +18,7 @@ export default function Index() {
 
 function Hero() {
   return (
-    <section id="hero" className="relative min-h-[80vh] md:min-h-[92vh] flex items-center">
+    <section id="hero" className="relative min-h-[80vh] md:min-h-[92vh] flex items-center bg-[#16351a]">
       <div className="absolute inset-0 -z-10 overflow-hidden">
         <video className="h-full w-full object-cover" autoPlay muted loop playsInline poster="/placeholder.svg">
           <source src="/videos/drone-farm.mp4" type="video/mp4" />
