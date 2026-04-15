@@ -191,7 +191,8 @@ def main():
     working_source = args.source_dir
 
     if args.hf_dataset:
-        hf_export_dir = args.output_dir / "_hf_export"
+        # Keep HF export outside output-dir because output-dir is cleaned before writing splits.
+        hf_export_dir = args.output_dir.parent / f"{args.output_dir.name}_hf_export"
         export_hf_dataset(
             dataset_id=args.hf_dataset,
             hf_split=args.hf_split,
