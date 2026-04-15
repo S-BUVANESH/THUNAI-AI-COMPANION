@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react";
+import { Link, NavLink } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const links = [
-  { label: "Features", href: "#features" },
-  { label: "How It Works", href: "#how" },
-  { label: "Community", href: "#community" },
-  { label: "About Us", href: "#about" },
+const pageLinks = [
+  { label: "Home", to: "/" },
+  { label: "Diagnostics", to: "/diagnostics" },
+  { label: "Crop Switch", to: "/crop-switch" },
+];
+
+const sectionLinks = [
+  { label: "Community", href: "/#community" },
+  { label: "About", href: "/#about" },
 ];
 
 export default function NavBar() {
@@ -28,30 +33,45 @@ export default function NavBar() {
       )}
     >
       <nav className="container mx-auto flex h-16 items-center justify-between">
-        <a
-          href="#hero"
-          className="text-xl font-extrabold tracking-wide text-foreground"
-        >
+        <Link to="/" className="text-xl font-extrabold tracking-wide text-foreground">
           <span className="text-primary">THUNAI</span>
-        </a>
-        <div className="hidden md:flex items-center gap-8">
-          {links.map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              className="text-sm text-foreground/80 hover:text-foreground transition-colors"
+        </Link>
+
+        <div className="hidden items-center gap-8 md:flex">
+          {pageLinks.map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
+              className={({ isActive }) =>
+                cn(
+                  "text-sm transition-colors",
+                  isActive
+                    ? "font-semibold text-foreground"
+                    : "text-foreground/80 hover:text-foreground",
+                )
+              }
             >
-              {l.label}
+              {link.label}
+            </NavLink>
+          ))}
+          {sectionLinks.map((link) => (
+            <a
+              key={link.href}
+              href={link.href}
+              className="text-sm text-foreground/80 transition-colors hover:text-foreground"
+            >
+              {link.label}
             </a>
           ))}
           <Button asChild className="rounded-md">
-            <a href="#how">Launch App</a>
+            <Link to="/diagnostics">Launch App</Link>
           </Button>
         </div>
+
         <button
           aria-label="Toggle menu"
-          className="md:hidden inline-flex items-center justify-center p-2 rounded-md border border-transparent hover:border-border"
-          onClick={() => setOpen((v) => !v)}
+          className="inline-flex items-center justify-center rounded-md border border-transparent p-2 hover:border-border md:hidden"
+          onClick={() => setOpen((value) => !value)}
         >
           <svg
             className="h-6 w-6"
@@ -70,23 +90,41 @@ export default function NavBar() {
           </svg>
         </button>
       </nav>
+
       {open && (
-        <div className="md:hidden border-t bg-white">
-          <div className="container py-3 flex flex-col gap-3">
-            {links.map((l) => (
+        <div className="border-t bg-white md:hidden">
+          <div className="container flex flex-col gap-3 py-3">
+            {pageLinks.map((link) => (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                onClick={() => setOpen(false)}
+                className={({ isActive }) =>
+                  cn(
+                    "py-2",
+                    isActive
+                      ? "font-semibold text-foreground"
+                      : "text-foreground/80 hover:text-foreground",
+                  )
+                }
+              >
+                {link.label}
+              </NavLink>
+            ))}
+            {sectionLinks.map((link) => (
               <a
-                key={l.href}
-                href={l.href}
+                key={link.href}
+                href={link.href}
                 onClick={() => setOpen(false)}
                 className="py-2 text-foreground/80 hover:text-foreground"
               >
-                {l.label}
+                {link.label}
               </a>
             ))}
             <Button asChild className="w-full">
-              <a href="#how" onClick={() => setOpen(false)}>
+              <Link to="/diagnostics" onClick={() => setOpen(false)}>
                 Launch App
-              </a>
+              </Link>
             </Button>
           </div>
         </div>
