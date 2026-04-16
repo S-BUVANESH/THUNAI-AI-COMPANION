@@ -44,6 +44,19 @@ MODEL_SEED_OFFSETS = {
     "custom-cnn": 281,
 }
 
+CROP_HINT_ALIASES = {
+    "maize": ["corn (maize)", "corn maize"],
+    "chilli": ["pepper bell", "pepper, bell"],
+    "pepper": ["pepper bell", "pepper, bell"],
+    "capsicum": ["pepper bell", "pepper, bell"],
+    "tomato": ["tomato"],
+    "rice": ["rice"],
+    "cotton": ["cotton"],
+    "groundnut": ["groundnut", "peanut"],
+    "turmeric": ["turmeric"],
+    "banana": ["banana"],
+}
+
 # Canonical PlantVillage id -> class label mapping used by dpdl-benchmark/plant_village.
 PLANT_VILLAGE_ID_TO_LABEL = {
     "0": "Apple___Apple_scab",
@@ -234,6 +247,34 @@ def normalize_class_names(class_names):
         return [humanize_disease_label(PLANT_VILLAGE_ID_TO_LABEL[str(name)]) for name in class_names]
 
     return [humanize_disease_label(str(name)) for name in class_names]
+
+
+def normalized_text(value):
+    return str(value).strip().lower().replace("_", " ").replace(",", "")
+
+
+def crop_hint_candidates(crop_hint):
+    hint = normalized_text(crop_hint)
+    candidates = [hint]
+    candidates.extend(CROP_HINT_ALIASES.get(hint, []))
+    return [candidate for candidate in candidates if candidate]
+
+
+def label_matches_crop_hint(label, crop_hint):
+    if not crop_hint:
+        return True
+
+    label_text = normalized_text(label)
+    crop_prefix = label_text.split(" - ", 1)[0]
+    if crop_prefix == normalized_text(crop_hint):
+        return True
+
+    for candidate in crop_hint_candidates(crop_hint):
+        if crop_prefix == candidate:
+            return True
+        if candidate in crop_prefix:
+            return True
+    return False
 
 
 def normalize_requested_mode(value):
@@ -431,7 +472,7 @@ def build_advisory(label):
     return details
 
 
-def ranked_fallback_predictions(filename, digest, class_names, requested_mode):
+def ranked_fallback_predictions(filename, digest, class_names, requested_mode, crop_hint=""):
     normalized = filename.lower()
     keyword_map = {
         "healthy": "Healthy",
@@ -446,20 +487,26 @@ def ranked_fallback_predictions(filename, digest, class_names, requested_mode):
         "spot": "Brown Spot",
     }
 
+    eligible_classes = [
+        label for label in class_names if label_matches_crop_hint(label, crop_hint)
+    ]
+    if not eligible_classes:
+        eligible_classes = class_names
+
     matched = next(
         (
             label
             for keyword, label in keyword_map.items()
-            if keyword in normalized and label in class_names
+            if keyword in normalized and label in eligible_classes
         ),
         None,
     )
     seed = int(digest[:8], 16) + MODEL_SEED_OFFSETS[requested_mode]
     if matched is None:
-        matched = class_names[seed % len(class_names)]
+        matched = eligible_classes[seed % len(eligible_classes)]
 
     randomizer = random.Random(seed)
-    remaining = [label for label in class_names if label != matched]
+    remaining = [label for label in eligible_classes if label != matched]
     randomizer.shuffle(remaining)
     ordered = [matched, *remaining]
 
@@ -532,7 +579,7 @@ def preprocess_image(image_bytes, image_size):
     return tensor
 
 
-def analyze_with_trained_model(image_bytes, model_key):
+def analyze_with_trained_model(image_bytes, model_key, crop_hint=""):
     import torch
 
     model, class_names, image_size = load_trained_model(model_key)
@@ -542,13 +589,26 @@ def analyze_with_trained_model(image_bytes, model_key):
         logits = model(tensor)
         probabilities = torch.softmax(logits, dim=1).cpu().numpy()[0]
 
-    ranked_indices = np.argsort(probabilities)[::-1][:3]
+    ranked_indices = np.argsort(probabilities)[::-1]
+    if crop_hint:
+        eligible_indices = [
+            index
+            for index, label in enumerate(class_names)
+            if label_matches_crop_hint(label, crop_hint)
+        ]
+        if eligible_indices:
+            eligible_probs = probabilities[eligible_indices]
+            ranked_indices = [
+                eligible_indices[int(index)]
+                for index in np.argsort(eligible_probs)[::-1]
+            ]
+
     return [
         {
             "label": class_names[int(index)],
             "confidence": round(float(probabilities[int(index)]), 4),
         }
-        for index in ranked_indices
+        for index in ranked_indices[:3]
     ]
 
 
@@ -584,13 +644,14 @@ def handle_analyze(payload):
     status = model_status(requested_mode)
 
     if status["mode"] in MODEL_VARIANTS:
-        predictions = analyze_with_trained_model(image_bytes, status["mode"])
+        predictions = analyze_with_trained_model(image_bytes, status["mode"], crop_hint)
     else:
         predictions = ranked_fallback_predictions(
             image_name,
             digest,
             status["class_names"],
             requested_mode,
+            crop_hint,
         )
 
     return build_response(predictions, crop_hint, digest, requested_mode)

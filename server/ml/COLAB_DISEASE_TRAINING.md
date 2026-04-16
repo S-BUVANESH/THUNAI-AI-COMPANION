@@ -1,48 +1,19 @@
 # THUNAI Disease CNN Training (Colab)
 
-This guide trains both disease model paths used by THUNAI diagnostics:
+This guide retrains the disease models from a Hugging Face dataset source and exports artifacts that THUNAI can load directly.
 
-- pretrained-transfer (ResNet18 transfer learning)
-- custom-cnn (scratch CNN)
+Primary path:
 
-It is designed for Google Colab GPU and exports artifacts that THUNAI can load directly.
+- Hugging Face PlantVillage-style dataset export
+- pretrained-transfer retraining (recommended)
+- custom-cnn retraining (optional)
 
-## 1) Prepare Dataset (folder-per-class)
-
-Expected structure:
-
-```text
-dataset_root/
-  Healthy/
-    img1.jpg
-    ...
-  Brown Spot/
-    img1.jpg
-    ...
-  Rust/
-  Powdery Mildew/
-  ...
-```
-
-THUNAI trainer reads class names from folder names.
-
-## 2) Dataset Sources
-
-Use one of the following and reshape into the folder-per-class layout above.
-
-- Kaggle PlantVillage dataset family (multiple mirrors exist)
-- Roboflow public plant disease datasets
-- GitHub repositories that host PlantVillage subsets
-
-Recommended for consistency: a PlantVillage variant with stable disease labels.
-
-## 3) Colab Setup
+## 1) Colab Setup
 
 In Colab:
 
 1. Runtime -> Change runtime type -> GPU
-2. Upload your dataset zip or mount Google Drive
-3. Clone THUNAI repo branch containing disease ML scripts
+2. Clone the THUNAI repo branch containing disease ML scripts
 
 Example setup cell:
 
@@ -53,25 +24,31 @@ Example setup cell:
 !python -m pip install torch torchvision pillow numpy
 ```
 
-If dataset zip is uploaded to Colab:
-
-```bash
-!mkdir -p /content/data
-!unzip -q /content/<dataset>.zip -d /content/data
-```
-
-## 4) Train Both Models
+## 2) Export Dataset from Hugging Face
 
 Run from THUNAI.AI/server/ml:
 
 ```bash
+!python prepare_disease_dataset.py \
+  --hf-dataset dpdl-benchmark/plant_village \
+  --hf-split train \
+  --hf-image-column image \
+  --hf-label-column label \
+  --output-dir /content/data/disease_splits \
+  --val-split 0.2 \
+  --test-split 0.1
+```
+
+## 3) Retrain the Transfer Model
+
+```bash
 !python train_both_disease_models.py \
-  --dataset /content/data/<dataset_root> \
+  --dataset /content/data/disease_splits/train \
   --output-dir ./models \
-  --epochs-transfer 12 \
-  --epochs-custom 20 \
+  --skip-custom \
+  --epochs-transfer 16 \
   --batch-size 32 \
-  --learning-rate 0.001 \
+  --learning-rate 0.0003 \
   --val-split 0.2
 ```
 
@@ -80,23 +57,22 @@ Artifacts created in models/:
 - plant_disease_transfer.pt
 - plant_disease_transfer_classes.json
 - plant_disease_transfer_metrics.json
-- plant_disease_cnn.pt
-- plant_disease_cnn_classes.json
-- plant_disease_cnn_metrics.json
 
-## 5) Copy Artifacts Back to THUNAI
+If you want a custom CNN backup as well, rerun the same command without `--skip-custom`.
 
-Copy all six artifacts into:
+## 4) Copy Artifacts Back to THUNAI
+
+Copy the generated artifacts into:
 
 - THUNAI.AI/server/ml/models
 
 Once copied, THUNAI diagnostics automatically resolves model availability:
 
 - requested pretrained-transfer -> uses transfer model
-- requested custom-cnn -> uses custom model
+- requested custom-cnn -> uses custom model if you retrain it
 - requested auto -> uses best available in priority order
 
-## 6) Quick Validation
+## 5) Quick Validation
 
 From THUNAI.AI:
 
@@ -111,7 +87,7 @@ Then test disease status/analyze API routes for:
 - requested_model=custom-cnn
 - requested_model=auto
 
-## 7) Recommended Next Improvements
+## 6) Recommended Next Improvements
 
 - Add augmentation (flip, rotate, color jitter) in train_disease_cnn.py
 - Add early stopping and LR scheduling

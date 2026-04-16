@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import random
+from collections import Counter
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +14,10 @@ try:
     from PIL import Image
     from torch import nn
     from torch.utils.data import DataLoader, Dataset
+    try:
+        from torchvision import transforms
+    except Exception:  # pragma: no cover - optional dependency
+        transforms = None
 except Exception as exc:  # pragma: no cover - optional dependency
     raise SystemExit(
         "train_disease_cnn.py requires torch and pillow. "
@@ -29,10 +35,40 @@ ARTIFACT_STEMS = {
 
 
 class LeafImageDataset(Dataset):
-    def __init__(self, samples, class_names, image_size):
+    def __init__(self, samples, class_names, image_size, augment=False):
         self.samples = samples
         self.class_to_idx = {name: index for index, name in enumerate(class_names)}
         self.image_size = image_size
+        self.augment = augment
+
+        if transforms is not None:
+            self.train_transform = transforms.Compose(
+                [
+                    transforms.RandomResizedCrop(
+                        self.image_size, scale=(0.82, 1.0), ratio=(0.9, 1.1)
+                    ),
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomRotation(degrees=16),
+                    transforms.ColorJitter(
+                        brightness=0.15,
+                        contrast=0.15,
+                        saturation=0.15,
+                        hue=0.03,
+                    ),
+                    transforms.ToTensor(),
+                    transforms.Normalize(DEFAULT_MEAN, DEFAULT_STD),
+                ]
+            )
+            self.eval_transform = transforms.Compose(
+                [
+                    transforms.Resize((self.image_size, self.image_size)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(DEFAULT_MEAN, DEFAULT_STD),
+                ]
+            )
+        else:
+            self.train_transform = None
+            self.eval_transform = None
 
     def __len__(self):
         return len(self.samples)
@@ -42,6 +78,11 @@ class LeafImageDataset(Dataset):
         image = Image.open(image_path).convert("RGB").resize(
             (self.image_size, self.image_size)
         )
+        if self.train_transform is not None:
+            transform = self.train_transform if self.augment else self.eval_transform
+            tensor = transform(image)
+            return tensor, self.class_to_idx[label]
+
         array = np.asarray(image, dtype=np.float32) / 255.0
         mean = np.asarray(DEFAULT_MEAN, dtype=np.float32)
         std = np.asarray(DEFAULT_STD, dtype=np.float32)
@@ -82,6 +123,30 @@ def parse_args():
         "--use-imagenet-weights",
         action="store_true",
         help="When using pretrained-transfer, initialize from torchvision ImageNet weights.",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=2,
+        help="DataLoader worker count. Use 0 on constrained environments, higher on Colab GPUs.",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=3,
+        help="Stop after this many epochs without validation improvement.",
+    )
+    parser.add_argument(
+        "--min-delta",
+        type=float,
+        default=0.001,
+        help="Minimum validation accuracy improvement required to reset early stopping.",
+    )
+    parser.add_argument(
+        "--freeze-backbone-epochs",
+        type=int,
+        default=0,
+        help="For pretrained-transfer, freeze the backbone for this many initial epochs.",
     )
     return parser.parse_args()
 
@@ -128,6 +193,17 @@ def set_seed(seed):
     torch.manual_seed(seed)
 
 
+def build_class_weights(samples, class_names):
+    counts = Counter(label for _, label in samples)
+    sample_count = max(len(samples), 1)
+    class_count = max(len(class_names), 1)
+    weights = [
+        sample_count / (class_count * max(counts.get(class_name, 0), 1))
+        for class_name in class_names
+    ]
+    return torch.tensor(weights, dtype=torch.float32)
+
+
 def evaluate(model, loader, device):
     if len(loader.dataset) == 0:
         return {"loss": 0.0, "accuracy": 0.0}
@@ -154,9 +230,58 @@ def evaluate(model, loader, device):
     }
 
 
+def train_step(model, loader, criterion, optimizer, device, scaler=None):
+    model.train()
+    running_loss = 0.0
+    running_correct = 0
+    seen = 0
+
+    use_amp = scaler is not None and device == "cuda"
+    autocast = torch.cuda.amp.autocast if use_amp else nullcontext
+
+    for inputs, targets in loader:
+        inputs = inputs.to(device, non_blocking=True)
+        targets = targets.to(device, non_blocking=True)
+
+        optimizer.zero_grad(set_to_none=True)
+        with autocast():
+            logits = model(inputs)
+            loss = criterion(logits, targets)
+
+        if use_amp:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
+
+        running_loss += float(loss.item()) * len(inputs)
+        running_correct += int((logits.argmax(dim=1) == targets).sum().item())
+        seen += len(inputs)
+
+    return {
+        "loss": round(running_loss / max(seen, 1), 4),
+        "accuracy": round(running_correct / max(seen, 1), 4),
+    }
+
+
+def set_backbone_trainable(model, trainable: bool):
+    backbone = getattr(model, "backbone", None)
+    if backbone is None:
+        return False
+
+    for parameter in backbone.parameters():
+        parameter.requires_grad = trainable
+    return True
+
+
 def main():
     args = parse_args()
     set_seed(args.seed)
+
+    if hasattr(torch.backends, "cudnn") and torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
 
     class_names, train_samples, val_samples = collect_samples(
         args.dataset,
@@ -166,20 +291,32 @@ def main():
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    train_dataset = LeafImageDataset(train_samples, class_names, args.image_size)
-    val_dataset = LeafImageDataset(val_samples, class_names, args.image_size)
+    train_dataset = LeafImageDataset(
+        train_samples,
+        class_names,
+        args.image_size,
+        augment=True,
+    )
+    val_dataset = LeafImageDataset(
+        val_samples,
+        class_names,
+        args.image_size,
+        augment=False,
+    )
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=0,
+        num_workers=max(args.num_workers, 0),
+        pin_memory=torch.cuda.is_available(),
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=max(args.num_workers, 0),
+        pin_memory=torch.cuda.is_available(),
     )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -190,33 +327,23 @@ def main():
         pretrained=args.use_imagenet_weights,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    criterion = nn.CrossEntropyLoss()
+    class_weights = build_class_weights(train_samples, class_names).to(device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    scaler = torch.cuda.amp.GradScaler() if device == "cuda" else None
+    is_transfer_model = args.model_type == "pretrained-transfer"
 
     history = []
+    best_state = None
+    best_val_accuracy = float("-inf")
+    epochs_without_improvement = 0
     for epoch in range(1, args.epochs + 1):
-        model.train()
-        running_loss = 0.0
-        running_correct = 0
-        seen = 0
+        if is_transfer_model and args.freeze_backbone_epochs > 0:
+            if epoch <= args.freeze_backbone_epochs:
+                set_backbone_trainable(model, False)
+            else:
+                set_backbone_trainable(model, True)
 
-        for inputs, targets in train_loader:
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-
-            optimizer.zero_grad()
-            logits = model(inputs)
-            loss = criterion(logits, targets)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += float(loss.item()) * len(inputs)
-            running_correct += int((logits.argmax(dim=1) == targets).sum().item())
-            seen += len(inputs)
-
-        train_metrics = {
-            "loss": round(running_loss / max(seen, 1), 4),
-            "accuracy": round(running_correct / max(seen, 1), 4),
-        }
+        train_metrics = train_step(model, train_loader, criterion, optimizer, device, scaler=scaler)
         val_metrics = evaluate(model, val_loader, device)
         history.append(
             {
@@ -232,6 +359,25 @@ def main():
             f"val_loss={val_metrics['loss']:.4f} "
             f"val_acc={val_metrics['accuracy']:.4f}"
         )
+
+        if val_metrics["accuracy"] > (best_val_accuracy + args.min_delta):
+            best_val_accuracy = val_metrics["accuracy"]
+            epochs_without_improvement = 0
+            best_state = {
+                key: value.detach().cpu().clone()
+                for key, value in model.state_dict().items()
+            }
+        else:
+            epochs_without_improvement += 1
+
+        if epochs_without_improvement >= args.patience:
+            print(
+                f"Early stopping at epoch {epoch} after {args.patience} epochs without improvement."
+            )
+            break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
     artifact_stem = ARTIFACT_STEMS[args.model_type]
     weights_path = output_dir / f"{artifact_stem}.pt"
@@ -258,6 +404,7 @@ def main():
                 "epochs": args.epochs,
                 "batch_size": args.batch_size,
                 "learning_rate": args.learning_rate,
+                "class_weights": [round(float(value), 6) for value in class_weights.detach().cpu().tolist()],
                 "device": device,
                 "model_type": args.model_type,
                 "use_imagenet_weights": args.use_imagenet_weights,

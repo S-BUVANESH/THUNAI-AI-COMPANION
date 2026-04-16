@@ -1,10 +1,10 @@
 # THUNAI Hugging Face Transfer Training
 
-This guide gives you runnable code paths for:
+This guide gives you a Hugging Face-first retraining path for THUNAI disease models:
 
-- Creating a split dataset (train/val/test)
-- Training a custom CNN (existing THUNAI trainer)
-- Training a pretrained Hugging Face model
+- export a split dataset from Hugging Face
+- retrain the pretrained transfer model
+- optionally train a Hugging Face transformer model
 
 ## 1) Install Packages (Colab)
 
@@ -15,18 +15,6 @@ This guide gives you runnable code paths for:
 ```
 
 ## 2) Prepare Dataset
-
-If you already have class folders:
-
-```bash
-!python prepare_disease_dataset.py \
-  --source-dir /content/data/raw_dataset \
-  --output-dir /content/data/disease_splits \
-  --val-split 0.2 \
-  --test-split 0.1
-```
-
-If you want to pull from a Hugging Face dataset first:
 
 ```bash
 !python prepare_disease_dataset.py \
@@ -48,19 +36,20 @@ Output layout:
   test/<class_name>/*.jpg
 ```
 
-## 3) Train Custom CNN (THUNAI)
+## 3) Train the Transfer CNN used by THUNAI
 
 ```bash
 !python train_disease_cnn.py \
   --dataset /content/data/disease_splits/train \
   --output-dir ./models \
-  --model-type custom-cnn \
-  --epochs 20 \
+  --model-type pretrained-transfer \
+  --use-imagenet-weights \
+  --epochs 16 \
   --batch-size 32 \
-  --learning-rate 0.001
+  --learning-rate 0.0003
 ```
 
-## 4) Train Pretrained Hugging Face Model
+## 4) Optional: Train Pretrained Hugging Face Model
 
 ```bash
 !python train_disease_hf.py \

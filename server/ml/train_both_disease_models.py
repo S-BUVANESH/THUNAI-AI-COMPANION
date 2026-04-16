@@ -30,6 +30,30 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=2,
+        help="DataLoader worker count passed to the underlying trainer.",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=3,
+        help="Early-stopping patience passed to the underlying trainer.",
+    )
+    parser.add_argument(
+        "--min-delta",
+        type=float,
+        default=0.001,
+        help="Minimum validation accuracy gain for early stopping.",
+    )
+    parser.add_argument(
+        "--freeze-backbone-epochs",
+        type=int,
+        default=0,
+        help="Freeze the pretrained-transfer backbone for this many initial epochs.",
+    )
+    parser.add_argument(
         "--skip-transfer",
         action="store_true",
         help="Skip training the pretrained transfer-learning model.",
@@ -76,6 +100,14 @@ def main():
         str(args.seed),
         "--image-size",
         str(args.image_size),
+        "--num-workers",
+        str(args.num_workers),
+        "--patience",
+        str(args.patience),
+        "--min-delta",
+        str(args.min_delta),
+        "--freeze-backbone-epochs",
+        str(args.freeze_backbone_epochs),
     ]
 
     if not args.skip_transfer:
