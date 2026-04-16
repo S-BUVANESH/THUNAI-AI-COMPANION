@@ -237,7 +237,10 @@ def train_step(model, loader, criterion, optimizer, device, scaler=None):
     seen = 0
 
     use_amp = scaler is not None and device == "cuda"
-    autocast = torch.cuda.amp.autocast if use_amp else nullcontext
+    if use_amp and hasattr(torch, "amp"):
+        autocast = lambda: torch.amp.autocast("cuda")
+    else:
+        autocast = torch.cuda.amp.autocast if use_amp else nullcontext
 
     for inputs, targets in loader:
         inputs = inputs.to(device, non_blocking=True)
@@ -273,6 +276,14 @@ def set_backbone_trainable(model, trainable: bool):
 
     for parameter in backbone.parameters():
         parameter.requires_grad = trainable
+
+    # Keep the classification head trainable even when freezing the backbone,
+    # otherwise the loss tensor has no trainable path and backward() fails.
+    head = getattr(backbone, "fc", None)
+    if head is not None:
+        for parameter in head.parameters():
+            parameter.requires_grad = True
+
     return True
 
 
@@ -329,7 +340,10 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     class_weights = build_class_weights(train_samples, class_names).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
-    scaler = torch.cuda.amp.GradScaler() if device == "cuda" else None
+    if device == "cuda" and hasattr(torch, "amp"):
+        scaler = torch.amp.GradScaler("cuda")
+    else:
+        scaler = torch.cuda.amp.GradScaler() if device == "cuda" else None
     is_transfer_model = args.model_type == "pretrained-transfer"
 
     history = []
