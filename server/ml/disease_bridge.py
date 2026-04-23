@@ -598,10 +598,14 @@ def analyze_with_trained_model(image_bytes, model_key, crop_hint=""):
         ]
         if eligible_indices:
             eligible_probs = probabilities[eligible_indices]
-            ranked_indices = [
-                eligible_indices[int(index)]
-                for index in np.argsort(eligible_probs)[::-1]
-            ]
+            # If crop-filtered scores are extremely weak, keep global ranking.
+            # This avoids showing 0%-confidence predictions for the hinted crop
+            # when the model strongly believes another crop class.
+            if float(np.max(eligible_probs)) >= 0.001:
+                ranked_indices = [
+                    eligible_indices[int(index)]
+                    for index in np.argsort(eligible_probs)[::-1]
+                ]
 
     return [
         {
